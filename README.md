@@ -33,9 +33,12 @@ face_tracker/
 2. Create a Python virtual environment
 
     python3 -m venv venv
+
+3. Activate Virtual Environment (ex. "(venv) txt-102@TXT-60 ...")
+
     source venv/bin/activate
 
-3. Install dependencies
+4. Install dependencies
 
     pip install -r requirements.txt
 
@@ -53,6 +56,8 @@ Option B: Manual run
     python face_detect.py
 
 Press `q` while the webcam window is open to quit.
+
+When done, remember to deactivate the VM with `Deactivate` in terminal.
 
 ---
 
