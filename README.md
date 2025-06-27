@@ -15,13 +15,13 @@ This project uses a webcam to detect faces in real-time using MediaPipe and Open
 ---
 
 ## Project Structure
-
-face_tracker/
-├── face_detect.py        # Main Python script
-├── run.sh                # Script to activate venv and run detection
-├── requirements.txt      # Python dependencies
-└── venv/                 # Virtual environment (created locally)
-
+  
+face_tracker/  
+├── face_detect.py        # Main Python script  
+├── run.sh                # Script to activate venv and run detection 
+├── requirements.txt      # Python dependencies  
+└── venv/                 # Virtual environment (created locally)  
+  
 ---
 
 ## Setup Instructions (macOS/Linux)
