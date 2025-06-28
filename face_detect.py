@@ -1,154 +1,118 @@
-import cv2                # OpenCV for video and image processing
-import joblib             # For loading saved machine learning models
-import numpy as np        # Useful for image manipulation
-import mediapipe as mp    # MediaPipe for face landmarks
-from collections import deque # For landmark detection buffer
+import cv2
+import numpy as np
+import mediapipe as mp
+import joblib
+from collections import deque
 from statistics import mode
 
-# Create a rolling window for the last N predictions
-EYE_BUFFER = deque(maxlen=5)     # Try 5–10 for low flicker
-MOUTH_BUFFER = deque(maxlen=5)
-
-# Load the trained SVM models for eye state and yawn detection
+# === LOAD MODELS ===
 eye_model = joblib.load('eye_state_model.pkl')
 yawn_model = joblib.load('yawn_model.pkl')
+pca_yawn = joblib.load('yawn_pca.pkl')
 
-# Initialize the MediaPipe Face Mesh model (detects 468 facial landmarks)
+# === CONFIGURATION ===
+IMG_SIZE = 48                  # Input image size
+EYE_PAD = 15                   # Buffer around eyes
+MOUTH_PAD = 25                 # Buffer around mouth
+BUFFER_SIZE = 10               # Number of frames to smooth predictions over
+
+# === Initialize Smoothing Buffers ===
+eye_buffer = deque(maxlen=BUFFER_SIZE)    # Holds last N eye predictions
+yawn_buffer = deque(maxlen=BUFFER_SIZE)   # Holds last N yawn predictions
+
+# === MEDIAPIPE SETUP ===
 mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(
-    static_image_mode=False,  # Real-time detection, not single-image
-    max_num_faces=1           # We only care about the first face in frame
-)
+face_mesh = mp_face_mesh.FaceMesh(static_image_mode=False, max_num_faces=1)
 
-# Define landmark indices around left eye, right eye, and mouth
-# These are carefully chosen for tight coverage of these regions
-LEFT_EYE_IDX = [33, 160, 158, 133, 153, 144, 163, 7]
-RIGHT_EYE_IDX = [362, 385, 387, 263, 373, 380, 390, 249]
+# === FACIAL LANDMARKS ===
+LEFT_EYE_IDX = [33, 160, 158, 133]
+RIGHT_EYE_IDX = [362, 385, 387, 263]
 MOUTH_IDX = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324]
 
-# All input images must be resized to this size before being passed to the models
-IMG_SIZE = 48
+def get_box(landmarks, indices, shape, pad=10):
+    """
+    Calculate a padded bounding box around specific landmark indices.
+    """
+    h, w, _ = shape
+    x_vals = [int(landmarks[i].x * w) for i in indices]
+    y_vals = [int(landmarks[i].y * h) for i in indices]
+    return (
+        max(min(x_vals) - pad, 0),
+        max(min(y_vals) - pad, 0),
+        min(max(x_vals) + pad, w),
+        min(max(y_vals) + pad, h)
+    )
 
 def classify_eye(roi):
-    """Classifies a region of interest (ROI) as an open or closed eye."""
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)               # Convert to grayscale
-    resized = cv2.resize(gray, (IMG_SIZE, IMG_SIZE))           # Resize to match training input
-    flat = resized.flatten().reshape(1, -1)                    # Flatten for the model
-    pred = eye_model.predict(flat)[0]                          # Predict with trained SVM
-    return "Open" if pred == 1 else "Closed"                   # Convert prediction to label
-
-def classify_yawn(roi):
-    """Classifies a region of interest (ROI) as yawning or not yawning."""
+    """
+    Predict eye state (Open/Closed) from a cropped eye ROI.
+    """
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    resized = cv2.resize(gray, (IMG_SIZE, IMG_SIZE))
-    flat = resized.flatten().reshape(1, -1)
-    pred = yawn_model.predict(flat)[0]
+    resized = cv2.resize(gray, (IMG_SIZE, IMG_SIZE)).flatten().reshape(1, -1)
+    pred = eye_model.predict(resized)[0]
+    return "Open" if pred == 1 else "Closed"
+
+def classify_yawn(roi, pca):
+    """
+    Predict yawn state from a cropped mouth ROI, using PCA-reduced input.
+    """
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    resized = cv2.resize(gray, (IMG_SIZE, IMG_SIZE)).flatten().reshape(1, -1)
+    reduced = pca.transform(resized)
+    pred = yawn_model.predict(reduced)[0]
     return "Yawning" if pred == 1 else "Not Yawning"
 
-# def get_bounding_box(landmarks, indices, frame_shape):
-#     """
-#     Given facial landmarks and a list of indices, return the bounding box
-#     (x_min, y_min, x_max, y_max) that encloses all points.
-#     """
-#     h, w, _ = frame_shape  # Get image dimensions
-#     x_vals, y_vals = [], []
-
-#     # Convert normalized landmark coordinates to pixel coordinates
-#     for idx in indices:
-#         x = int(landmarks[idx].x * w)
-#         y = int(landmarks[idx].y * h)
-#         x_vals.append(x)
-#         y_vals.append(y)
-
-#     # Add a bit of padding so the box isn't too tight
-#     padding = 5
-#     x_min = max(min(x_vals) - padding, 0)
-#     y_min = max(min(y_vals) - padding, 0)
-#     x_max = min(max(x_vals) + padding, w)
-#     y_max = min(max(y_vals) + padding, h)
-
-#     return x_min, y_min, x_max, y_max
-
-def get_bounding_box(landmarks, indices, frame_shape, padding=5):
-    """Compute a padded bounding box for a group of facial landmarks."""
-    h, w, _ = frame_shape
-    x_vals, y_vals = [], []
-
-    for idx in indices:
-        x = int(landmarks[idx].x * w)
-        y = int(landmarks[idx].y * h)
-        x_vals.append(x)
-        y_vals.append(y)
-
-    # Add customizable padding for looser box
-    x_min = max(min(x_vals) - padding, 0)
-    y_min = max(min(y_vals) - padding, 0)
-    x_max = min(max(x_vals) + padding, w)
-    y_max = min(max(y_vals) + padding, h)
-
-    return x_min, y_min, x_max, y_max
-
-# Start webcam video capture
+# === START VIDEO CAPTURE ===
 cap = cv2.VideoCapture(0)
+print("🚀 Launching live detection... Press 'q' to quit.")
 
 while True:
-    success, frame = cap.read()  # Read one frame
+    success, frame = cap.read()
     if not success:
-        break  # If camera fails, exit
+        break
 
-    h, w, _ = frame.shape  # Store frame size
-    # Convert to RGB (MediaPipe expects RGB images)
     results = face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-    # Default status if detection fails
-    eye_status = "Unknown"
-    yawn_status = "Unknown"
-
-    # If face was detected by MediaPipe
     if results.multi_face_landmarks:
-        for face_landmarks in results.multi_face_landmarks:
-            # Get bounding boxes for left eye, right eye, and mouth
-            left_eye_box = get_bounding_box(face_landmarks.landmark, LEFT_EYE_IDX, frame.shape, padding=15)
-            right_eye_box = get_bounding_box(face_landmarks.landmark, RIGHT_EYE_IDX, frame.shape, padding=15)
-            mouth_box = get_bounding_box(face_landmarks.landmark, MOUTH_IDX, frame.shape, padding=30)
+        landmarks = results.multi_face_landmarks[0].landmark
 
+        # Get region boxes with custom padding
+        lx1, ly1, lx2, ly2 = get_box(landmarks, LEFT_EYE_IDX, frame.shape, pad=EYE_PAD)
+        rx1, ry1, rx2, ry2 = get_box(landmarks, RIGHT_EYE_IDX, frame.shape, pad=EYE_PAD)
+        mx1, my1, mx2, my2 = get_box(landmarks, MOUTH_IDX, frame.shape, pad=MOUTH_PAD)
 
-            # Crop the regions of interest from the frame using the bounding boxes
-            eye_roi = frame[left_eye_box[1]:left_eye_box[3], left_eye_box[0]:left_eye_box[2]]
-            mouth_roi = frame[mouth_box[1]:mouth_box[3], mouth_box[0]:mouth_box[2]]
+        # Extract eye and mouth ROIs
+        left_eye_roi = frame[ly1:ly2, lx1:lx2]
+        right_eye_roi = frame[ry1:ry2, rx1:rx2]
+        mouth_roi = frame[my1:my2, mx1:mx2]
 
-            # Append new predictions to buffer
-            if eye_roi.size:
-                pred_eye = classify_eye(eye_roi)
-                EYE_BUFFER.append(pred_eye)
-                # Use the most common prediction in buffer
-                eye_status = mode(EYE_BUFFER)
+        # Classify only if ROI is valid size
+        if left_eye_roi.size and right_eye_roi.size:
+            # Optionally average both eyes
+            eye_status = classify_eye(left_eye_roi)
+            eye_buffer.append(eye_status)
 
-            if mouth_roi.size:
-                pred_mouth = classify_yawn(mouth_roi)
-                MOUTH_BUFFER.append(pred_mouth)
-                yawn_status = mode(MOUTH_BUFFER)
+        if mouth_roi.size:
+            yawn_status = classify_yawn(mouth_roi, pca_yawn)
+            yawn_buffer.append(yawn_status)
 
-            # Draw bounding boxes around the regions
-            cv2.rectangle(frame, (left_eye_box[0], left_eye_box[1]), (left_eye_box[2], left_eye_box[3]), (0, 255, 0), 2)
-            cv2.rectangle(frame, (right_eye_box[0], right_eye_box[1]), (right_eye_box[2], right_eye_box[3]), (0, 255, 0), 2)
-            cv2.rectangle(frame, (mouth_box[0], mouth_box[1]), (mouth_box[2], mouth_box[3]), (0, 0, 255), 2)
+        # Use most common value in buffer (smoothing)
+        stable_eye = mode(eye_buffer) if eye_buffer else "Unknown"
+        stable_yawn = mode(yawn_buffer) if yawn_buffer else "Unknown"
 
-            break  # Only process the first face detected
+        # Draw rectangles
+        cv2.rectangle(frame, (lx1, ly1), (lx2, ly2), (0, 255, 0), 2)  # Left eye
+        cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (0, 255, 0), 2)  # Right eye
+        cv2.rectangle(frame, (mx1, my1), (mx2, my2), (0, 0, 255), 2)  # Mouth
 
-    # Show the eye and yawn prediction status as text
-    cv2.putText(frame, f"Eyes: {eye_status}", (20, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
-    cv2.putText(frame, f"Yawn: {yawn_status}", (20, 70),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+        # Overlay predictions
+        cv2.putText(frame, f"Eyes: {stable_eye}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+        cv2.putText(frame, f"Yawn: {stable_yawn}", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,255), 2)
 
-    # Show the final video output
-    cv2.imshow("AI Monitor", frame)
-
-    # Exit loop if user presses 'q'
+    cv2.imshow("AI Drowsiness Monitor", frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Clean up camera and window when done
+# === CLEANUP ===
 cap.release()
 cv2.destroyAllWindows()

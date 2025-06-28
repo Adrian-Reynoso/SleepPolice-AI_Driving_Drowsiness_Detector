@@ -11,18 +11,17 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 # Prompt user to (re)train models
-echo ""
-read -p "Do you want to re-train the models? (y/n): " choice
-if [[ "$choice" == "y" ]]; then
-  echo "🎯 Training eye model..."
-  python train_eye_model.py
-  echo "🎯 Training mouth model..."
-  python train_mouth_model.py
-  echo "✅ Models trained and saved."
-else
-  echo "⏩ Skipping training. Using existing models."
+echo "💡 Do you want to re-train the models? (y/n): "
+read retrain
+
+if [ "$retrain" = "y" ]; then
+    echo "🎯 Training eye model..."
+    ./venv311/bin/python train_eye_model.py
+    echo "🎯 Training mouth model..."
+    ./venv311/bin/python train_mouth_model.py
+    echo "✅ Models trained and saved."
 fi
 
-# Launch real-time detection
 echo "🚀 Launching live AI detection..."
-python face_detect.py
+./venv311/bin/python face_detect.py
+

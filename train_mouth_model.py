@@ -1,102 +1,81 @@
 import os
 import cv2
 import numpy as np
-from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score
+from sklearn.linear_model import LogisticRegression
+from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 import joblib
 import mediapipe as mp
+from augment_utils import augment_image
 
-# === CONFIG ===
-IMG_SIZE = 48  # Resize all cropped mouths to 48x48
+# === CONFIGURATION ===
+IMG_SIZE = 48
 DATA_PATH = 'dataset/mouth'
 LABELS = ['yawn', 'no_yawn']
+N_COMPONENTS = 100  # PCA output dimensions
 
-# === SETUP MEDIAPIPE FACE MESH ===
+# === INIT MEDIAPIPE ===
 mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(
-    static_image_mode=True,  # Analyze images one at a time
-    max_num_faces=1          # Only care about one face per image
-)
+face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1)
 
-# Landmark indices around the mouth based on MediaPipe's 468-point face mesh
+# === Mouth landmarks from MediaPipe mesh ===
 MOUTH_IDX = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324]
 
 def extract_mouth(img):
-    """
-    Detects facial landmarks and extracts the mouth region as a cropped image.
-    Returns None if no face/mouth is detected.
-    """
+    """Returns cropped mouth from image or None if detection fails"""
     h, w, _ = img.shape
     rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb)
-
     if results.multi_face_landmarks:
-        # Use the first face detected
-        landmarks = results.multi_face_landmarks[0].landmark
-
-        # Convert normalized landmark coords to pixel values
-        x_vals = [int(landmarks[i].x * w) for i in MOUTH_IDX]
-        y_vals = [int(landmarks[i].y * h) for i in MOUTH_IDX]
-
-        # Get bounding box with padding
-        x_min = max(min(x_vals) - 20, 0)
-        y_min = max(min(y_vals) - 20, 0)
-        x_max = min(max(x_vals) + 20, w)
-        y_max = min(max(y_vals) + 20, h)
-
-        mouth_crop = img[y_min:y_max, x_min:x_max]
-        return mouth_crop if mouth_crop.size > 0 else None
-
+        lm = results.multi_face_landmarks[0].landmark
+        x_vals = [int(lm[i].x * w) for i in MOUTH_IDX]
+        y_vals = [int(lm[i].y * h) for i in MOUTH_IDX]
+        x_min, y_min = max(min(x_vals)-20, 0), max(min(y_vals)-20, 0)
+        x_max, y_max = min(max(x_vals)+20, w), min(max(y_vals)+20, h)
+        return img[y_min:y_max, x_min:x_max]
     return None
 
-# === LOAD AND PROCESS DATASET ===
-X = []  # Image data
-y = []  # Labels (0 = no_yawn, 1 = yawn)
+X, y = [], []
 
-print("🧠 Preprocessing dataset with mouth detection...")
+print("📦 Loading and augmenting mouth dataset...")
 
-# Iterate through each category folder
+# === LOAD IMAGES, CROP, AUGMENT ===
 for label in LABELS:
-    label_path = os.path.join(DATA_PATH, label)
-    for file in os.listdir(label_path):
-        img_path = os.path.join(label_path, file)
-
-        # Load image in color so we can run face detection
-        img = cv2.imread(img_path)
+    folder = os.path.join(DATA_PATH, label)
+    for file in os.listdir(folder):
+        path = os.path.join(folder, file)
+        img = cv2.imread(path)
         if img is None:
             continue
-
-        # Crop the mouth from the image
         mouth = extract_mouth(img)
         if mouth is None:
-            continue  # Skip if mouth can't be found
-
-        # Convert mouth region to grayscale
+            continue
         gray = cv2.cvtColor(mouth, cv2.COLOR_BGR2GRAY)
-
-        # Resize to 48x48, flatten to 1D array
         resized = cv2.resize(gray, (IMG_SIZE, IMG_SIZE))
-        X.append(resized.flatten())
-        y.append(1 if label == 'yawn' else 0)
+        augmented = augment_image(resized)
+        label_val = 1 if label == 'yawn' else 0
 
-# Convert to numpy arrays for ML model training
-X = np.array(X)
-y = np.array(y)
+        for aug in augmented:
+            X.append(aug.flatten())
+            y.append(label_val)
 
-# === SPLIT DATA ===
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X, y = np.array(X), np.array(y)
 
-# === TRAIN MODEL ===
-print("🎯 Training Support Vector Machine on cropped mouth images...")
-model = SVC(kernel='linear', probability=True)
+# === SPLIT AND PCA ===
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+pca = PCA(n_components=N_COMPONENTS)
+X_train = pca.fit_transform(X_train)
+X_test = pca.transform(X_test)
+
+# === TRAIN LOGISTIC REGRESSION ===
+print("⏳ Training mouth Logistic Regression...")
+model = LogisticRegression(solver='saga', max_iter=500, verbose=1)
 model.fit(X_train, y_train)
 
-# === EVALUATE MODEL ===
+# === EVALUATE AND SAVE ===
 y_pred = model.predict(X_test)
-print(f"✅ Accuracy: {accuracy_score(y_test, y_pred):.2f}")
-
-# === SAVE MODEL ===
+print(f"✅ Mouth Model Accuracy: {accuracy_score(y_test, y_pred):.2f}")
 joblib.dump(model, 'yawn_model.pkl')
-print("💾 Trained model saved as yawn_model.pkl")
-
+joblib.dump(pca, 'yawn_pca.pkl')
+print("💾 Saved: yawn_model.pkl + yawn_pca.pkl")
