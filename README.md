@@ -1,4 +1,5 @@
-# AI-Powered Drowsiness Detection with MediaPipe, OpenCV, and Scikit-learn
+# SleepPolice
+### AI-Powered Drowsiness Detection with MediaPipe, OpenCV, and Scikit-learn
 
 This project uses a webcam to detect drowsiness by classifying eye closure and yawning behavior, with future integration for Arduino-based servo feedback.
 
@@ -125,4 +126,3 @@ If you move the project to a new computer:
 
 - MediaPipe: https://mediapipe.dev/
 - OpenCV: https://opencv.org/
-# face_tracker
