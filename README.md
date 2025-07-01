@@ -37,19 +37,19 @@ This project uses a webcam to detect drowsiness by classifying eye closure and y
 
 1. Clone or download the project
 
-    cd face_tracker
+    `cd face_tracker`
 
 2. Create a Python virtual environment
 
-    python3 -m venv venv
+    `python3 -m venv venv`
 
 3. Activate Virtual Environment (ex. "(venv) txt-102@TXT-60 ...")
 
-    source venv/bin/activate
+    `source venv/bin/activate`
 
 4. Install dependencies
 
-    pip install -r requirements.txt
+    `pip install -r requirements.txt`
 
 ---
 
