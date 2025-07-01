@@ -19,16 +19,16 @@ This project uses a webcam to detect drowsiness by classifying eye closure and y
 
 ## Project Structure
   
-├── face_detect.py            # Main real-time detection script. 
-├── train_eye_model.py        # Trains open/closed eye classifier. 
-├── train_mouth_model.py      # Trains yawn/no-yawn classifier w/ PCA. 
-├── augment_utils.py          # Image augmentation for training. 
-├── eye_state_model.pkl       # Saved SVM model for eye state. 
-├── yawn_model.pkl            # Saved Logistic Regression model. 
-├── yawn_pca.pkl              # Saved PCA model for mouth feature reduction. 
-├── run.sh                    # Activates venv and runs detection. 
-├── requirements.txt          # Python dependencies. 
-├── venv/                     # Virtual environment. 
+├── face_detect.py            # Main real-time detection script  
+├── train_eye_model.py        # Trains open/closed eye classifier   
+├── train_mouth_model.py      # Trains yawn/no-yawn classifier w/ PCA  
+├── augment_utils.py          # Image augmentation for training  
+├── eye_state_model.pkl       # Saved SVM model for eye state  
+├── yawn_model.pkl            # Saved Logistic Regression model  
+├── yawn_pca.pkl              # Saved PCA model for mouth feature reduction  
+├── run.sh                    # Activates venv and runs detection  
+├── requirements.txt          # Python dependencies  
+├── venv/                     # Virtual environment  
 └── dataset/                  # Training images (Open/Closed, Yawn/No Yawn)   
   
 ---
