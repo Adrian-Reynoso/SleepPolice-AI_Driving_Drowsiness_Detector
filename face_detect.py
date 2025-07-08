@@ -4,6 +4,7 @@ import mediapipe as mp
 import joblib
 from collections import deque
 from statistics import mode
+import time  # Make sure this is imported at the top if not already
 
 # === LOAD MODELS ===
 eye_model = joblib.load('eye_state_model.pkl')
@@ -62,6 +63,19 @@ def classify_yawn(roi, pca):
     pred = yawn_model.predict(reduced)[0]
     return "Yawning" if pred == 1 else "Not Yawning"
 
+# Timers to track how long the mouth is open or eyes are closed
+mouth_open_start = None
+eyes_closed_start = None
+
+# Counters for total warnings issued
+yawn_warnings = 0
+eye_warnings = 0
+
+# Track last time a warning was shown and what it was
+last_warning_time = 0
+last_warning_text = ""
+total_strikes = 0
+
 # === START VIDEO CAPTURE ===
 cap = cv2.VideoCapture(0)
 print("🚀 Launching live detection... Press 'q' to quit.")
@@ -70,6 +84,8 @@ while True:
     success, frame = cap.read()
     if not success:
         break
+
+    h, w, _ = frame.shape
 
     results = face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
@@ -95,6 +111,51 @@ while True:
         if mouth_roi.size:
             yawn_status = classify_yawn(mouth_roi, pca_yawn)
             yawn_buffer.append(yawn_status)
+
+        current_time = time.time()
+
+        # === YAWN LOGIC ===
+        if yawn_status == "Yawning":
+            if mouth_open_start is None:
+                mouth_open_start = current_time
+            elif current_time - mouth_open_start >= 2.5:
+                # Yawn detected for over 2.5 seconds
+                if current_time - last_warning_time > 3:
+                    last_warning_text = "Stop Yawning"
+                    last_warning_time = current_time
+                    yawn_warnings += 1
+                    total_strikes += 1
+        else:
+            mouth_open_start = None
+
+        # === EYE CLOSURE LOGIC ===
+        if eye_status == "Closed":
+            if eyes_closed_start is None:
+                eyes_closed_start = current_time
+            elif current_time - eyes_closed_start >= 2:
+                if current_time - last_warning_time > 3:
+                    last_warning_text = "Open Your Eyes!"
+                    last_warning_time = current_time
+                    eye_warnings += 1
+                    total_strikes += 1
+        else:
+            eyes_closed_start = None
+
+        # === DISPLAY WARNINGS ON SCREEN ===
+        if total_strikes >= 3:
+            # Flash full screen red warning
+            if current_time - last_warning_time < 5:
+                overlay = frame.copy()
+                cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (0, 0, 255), -1)
+                alpha = 0.6
+                cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+                cv2.putText(frame, "WAKE UP", (int(w * 0.25), int(h / 2)), cv2.FONT_HERSHEY_SIMPLEX, 2.5, (255, 255, 255), 5)
+            else:
+                total_strikes = 0
+        else:
+            if current_time - last_warning_time < 3 and last_warning_text:
+                cv2.putText(frame, last_warning_text, (int(w * 0.1), int(h * 0.9)), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
+
 
         # Use most common value in buffer (smoothing)
         stable_eye = mode(eye_buffer) if eye_buffer else "Unknown"
